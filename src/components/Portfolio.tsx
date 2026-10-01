@@ -95,20 +95,21 @@ function SplitReveal({
   className = "",
   delay = 0,
   stagger = 0.03,
-  tag: Tag = "span",
+  tag = "span",
 }: {
   text: string;
   className?: string;
   delay?: number;
   stagger?: number;
-  tag?: keyof JSX.IntrinsicElements;
+  tag?: string;
 }) {
   const ref = useRef<HTMLElement>(null);
   const inView = useInView(ref as React.RefObject<Element>, { once: true, margin: "-80px" });
   const words = text.split(" ");
+  const Tag = tag as React.ElementType;
 
   return (
-    <Tag ref={ref as never} className={`${className} overflow-hidden`} aria-label={text}>
+    <Tag ref={ref} className={`${className} overflow-hidden`} aria-label={text}>
       {words.map((word, wi) => (
         <span key={wi} className="inline-block overflow-hidden mr-[0.25em]">
           <motion.span
@@ -486,7 +487,7 @@ function Hero() {
           >
             <TextScramble text="K · H — Studio / 2026" className="font-semibold" />
           </motion.div>
-          <TelemetryHUD onTriggerRunner={triggerRunner} isRunnerActive={isRunnerActive} />
+          <TelemetryHUD />
         </div>
 
         <div className="flex items-center gap-4 sm:gap-6">
