@@ -9,7 +9,11 @@ import {
   useMotionValue,
   useSpring,
   useInView,
-  MotionStyle,
+  useVelocity,
+  useAnimationFrame,
+  useMotionTemplate,
+  MotionConfig,
+  MotionValue,
 } from "framer-motion";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useReducedMotion } from "framer-motion";
@@ -41,6 +45,14 @@ import { TextScramble } from "@/components/TextScramble";
 import { KineticAudio } from "@/components/KineticAudio";
 import { TelemetryHUD } from "@/components/TelemetryHUD";
 import { FloatingGlyphs } from "@/components/FloatingGlyphs";
+import { Envelope } from "@/components/Envelope";
+import { NameRunner } from "@/components/NameRunner";
+import { useTheme } from "@/lib/theme";
+
+const EASE_OUT = [0.16, 1, 0.3, 1] as const;
+
+/* Seconds between the envelope letter covering the screen and the hero entrance starting */
+const INTRO_DELAY = 0.5;
 
 const projects = [
   {
@@ -173,22 +185,26 @@ function AnimatedCounter({ value, decimals = 0 }: { value: number; decimals?: nu
   return <span ref={ref}>{display}</span>;
 }
 
-/* ─── Custom cursor with comet trail ─── */
-type TrailDot = { id: number; x: number; y: number };
+/* ─── Custom cursor: locked to the pointer, animated in place — nothing trails behind ─── */
+type Ripple = { id: number; x: number; y: number };
+const CLICK_SPARKS = Array.from({ length: 8 }, (_, i) => (i / 8) * Math.PI * 2 + 0.3);
 function Cursor() {
   const mouseX = useMotionValue(-100);
   const mouseY = useMotionValue(-100);
-  const cursorX = useSpring(mouseX, { damping: 26, stiffness: 350 });
-  const cursorY = useSpring(mouseY, { damping: 26, stiffness: 350 });
-  const ringX = useSpring(mouseX, { damping: 20, stiffness: 180 });
-  const ringY = useSpring(mouseY, { damping: 20, stiffness: 180 });
 
   const [hovered, setHovered] = useState(false);
   const [clicked, setClicked] = useState(false);
   const [badgeText, setBadgeText] = useState("");
-  const [trail, setTrail] = useState<TrailDot[]>([]);
-  const trailIdRef = useRef(0);
-  const lastPosRef = useRef({ x: -100, y: -100 });
+  const [ripples, setRipples] = useState<Ripple[]>([]);
+  const rippleId = useRef(0);
+
+  // Squash and stretch: the dot elongates along its direction of travel
+  const velocityX = useSpring(useVelocity(mouseX), { damping: 40, stiffness: 500 });
+  const velocityY = useSpring(useVelocity(mouseY), { damping: 40, stiffness: 500 });
+  const speed = useTransform([velocityX, velocityY], ([x, y]: number[]) => Math.hypot(x, y));
+  const stretchRotate = useTransform([velocityX, velocityY], ([x, y]: number[]) => (Math.atan2(y, x) * 180) / Math.PI);
+  const stretchX = useTransform(speed, [0, 3000], [1, 2.2], { clamp: true });
+  const stretchY = useTransform(speed, [0, 3000], [1, 0.6], { clamp: true });
 
   useEffect(() => {
     const move = (e: MouseEvent) => {
@@ -203,20 +219,14 @@ function Cursor() {
         setBadgeText("");
         setHovered(!!t.closest?.("a, button, [data-magnet], [role='button'], input, textarea"));
       }
-
-      // Comet trail: spawn a dot every 30px of movement
-      const dx = e.clientX - lastPosRef.current.x;
-      const dy = e.clientY - lastPosRef.current.y;
-      if (Math.hypot(dx, dy) > 20) {
-        lastPosRef.current = { x: e.clientX, y: e.clientY };
-        const id = ++trailIdRef.current;
-        setTrail((prev) => [...prev.slice(-12), { id, x: e.clientX, y: e.clientY }]);
-        setTimeout(() => setTrail((prev) => prev.filter((d) => d.id !== id)), 600);
-      }
     };
-    const down = () => setClicked(true);
+    const down = (e: MouseEvent) => {
+      setClicked(true);
+      const id = ++rippleId.current;
+      setRipples((prev) => [...prev.slice(-3), { id, x: e.clientX, y: e.clientY }]);
+    };
     const up = () => setClicked(false);
-    window.addEventListener("mousemove", move);
+    window.addEventListener("mousemove", move, { passive: true });
     window.addEventListener("mousedown", down);
     window.addEventListener("mouseup", up);
     return () => {
@@ -226,81 +236,130 @@ function Cursor() {
     };
   }, [mouseX, mouseY]);
 
+  const idle = !hovered && !clicked && !badgeText;
+
   return (
     <>
-      {/* Comet trail dots */}
-      {trail.map((dot, i) => (
-        <motion.div
-          key={dot.id}
-          className="pointer-events-none fixed z-[218] hidden md:block rounded-full bg-accent"
-          initial={{ opacity: 0.7, scale: 1 }}
-          animate={{ opacity: 0, scale: 0.1 }}
-          transition={{ duration: 0.6, ease: "easeOut" }}
-          style={{
-            left: dot.x,
-            top: dot.y,
-            translateX: "-50%",
-            translateY: "-50%",
-            width: Math.max(3, 8 - (trail.length - 1 - i) * 0.5),
-            height: Math.max(3, 8 - (trail.length - 1 - i) * 0.5),
-            boxShadow: `0 0 ${6 + i}px rgba(255,59,31,0.8)`,
-          }}
-        />
+      {/* Click burst: a ring and a spray of sparks from where the click landed */}
+      {ripples.map((r) => (
+        <div key={r.id} className="pointer-events-none fixed left-0 top-0 z-[219] hidden md:block" style={{ transform: `translate(${r.x}px, ${r.y}px)` }}>
+          <motion.span
+            className="absolute -left-8 -top-8 h-16 w-16 rounded-full border-2 border-accent"
+            initial={{ scale: 0.2, opacity: 0.9 }}
+            animate={{ scale: 1.2, opacity: 0 }}
+            transition={{ duration: 0.6, ease: EASE_OUT }}
+            onAnimationComplete={() => setRipples((prev) => prev.filter((p) => p.id !== r.id))}
+          />
+          {CLICK_SPARKS.map((angle, i) => (
+            <motion.span
+              key={angle}
+              className="absolute -left-[3px] -top-[3px] h-1.5 w-1.5 rounded-full bg-accent"
+              initial={{ x: 0, y: 0, scale: 1, opacity: 1 }}
+              animate={{ x: Math.cos(angle) * (34 + (i % 2) * 16), y: Math.sin(angle) * (34 + (i % 2) * 16), scale: 0, opacity: 0 }}
+              transition={{ duration: 0.5, ease: EASE_OUT }}
+            />
+          ))}
+        </div>
       ))}
 
-      {/* Main dot */}
       <motion.div
-        className="pointer-events-none fixed z-[220] hidden md:block"
-        style={{ x: cursorX, y: cursorY, translateX: "-50%", translateY: "-50%" } as MotionStyle}
+        className="pointer-events-none fixed left-0 top-0 z-[220] hidden md:block"
+        style={{ x: mouseX, y: mouseY }}
       >
-        <motion.div
-          animate={{ scale: clicked ? 0.5 : badgeText ? 1.15 : hovered ? 2.2 : 1, opacity: 1 }}
-          transition={{ type: "spring", damping: 18, stiffness: 240 }}
-          className={`flex items-center justify-center rounded-full bg-accent text-accent-foreground font-mono font-bold ${
-            badgeText
-              ? "px-3 py-1 text-[9px] uppercase tracking-wider min-w-16 shadow-xl"
-              : "h-3.5 w-3.5"
-          }`}
-          style={{ boxShadow: hovered ? "0 0 20px rgba(255,59,31,0.9), 0 0 40px rgba(255,59,31,0.4)" : "0 0 10px rgba(255,59,31,0.6)" }}
-        >
-          {badgeText}
-        </motion.div>
-      </motion.div>
-
-      {/* Outer ring */}
-      <motion.div
-        className="pointer-events-none fixed z-[219] hidden md:block"
-        style={{ x: ringX, y: ringY, translateX: "-50%", translateY: "-50%" } as MotionStyle}
-      >
-        <motion.div
+        {/* Spinning dashed reticle that snaps open over anything clickable */}
+        <motion.span
+          className="absolute -left-5 -top-5 h-10 w-10 rounded-full border border-dashed border-accent"
           animate={{
-            scale: badgeText ? 2.4 : hovered ? 1.8 : 1,
-            opacity: badgeText ? 0.5 : hovered ? 0.6 : 0.2,
+            scale: badgeText ? 0 : clicked ? 0.6 : hovered ? 1 : 0,
+            opacity: hovered && !badgeText ? 1 : 0,
+            rotate: 360,
           }}
-          transition={{ type: "spring", damping: 22, stiffness: 180 }}
-          className="h-9 w-9 rounded-full border border-accent"
-          style={{ boxShadow: hovered ? "0 0 15px rgba(255,59,31,0.3)" : "none" }}
+          transition={{
+            scale: { type: "spring", damping: 16, stiffness: 300 },
+            opacity: { duration: 0.2 },
+            rotate: { duration: 6, repeat: Infinity, ease: "linear" },
+          }}
         />
+
+        {/* Satellite orbiting the dot while it rests */}
+        <motion.span
+          className="absolute -left-4 -top-4 h-8 w-8"
+          animate={{ rotate: 360, opacity: idle ? 1 : 0, scale: idle ? 1 : 0.4 }}
+          transition={{ rotate: { duration: 2.4, repeat: Infinity, ease: "linear" }, opacity: { duration: 0.25 }, scale: { duration: 0.25 } }}
+        >
+          <span className="absolute left-1/2 top-0 h-1 w-1 -translate-x-1/2 rounded-full bg-accent" />
+        </motion.span>
+
+        {/* Core dot: breathes at rest, stretches with speed, tightens on hover, squashes on click */}
+        <motion.div
+          className="absolute left-0 top-0 -translate-x-1/2 -translate-y-1/2"
+          style={badgeText ? undefined : { rotate: stretchRotate, scaleX: stretchX, scaleY: stretchY }}
+        >
+          <motion.div
+            animate={idle ? { scale: [1, 1.3, 1] } : { scale: clicked ? 0.5 : badgeText ? 1.15 : 0.7 }}
+            transition={
+              idle
+                ? { duration: 1.8, repeat: Infinity, ease: "easeInOut" }
+                : { type: "spring", damping: 18, stiffness: 320 }
+            }
+            className={`flex items-center justify-center rounded-full bg-accent text-accent-foreground font-mono font-bold ${
+              badgeText
+                ? "px-3 py-1 text-[9px] uppercase tracking-wider min-w-16 shadow-xl"
+                : "h-3.5 w-3.5"
+            }`}
+            style={{ boxShadow: hovered ? "0 0 20px rgba(255,59,31,0.9), 0 0 40px rgba(255,59,31,0.4)" : "0 0 10px rgba(255,59,31,0.6)" }}
+          >
+            {badgeText}
+          </motion.div>
+        </motion.div>
       </motion.div>
     </>
   );
 }
 
 /* ─── Marquee ─── */
+/* Four copies of the items, so one loop is exactly 25% of the track — speeds up and leans with scroll */
+const MARQUEE_COPIES = 4;
 function Marquee({ items, reverse = false }: { items: string[]; reverse?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const inView = useInView(ref);
+  const reduceMotion = useReducedMotion();
+
+  const baseX = useMotionValue(0);
+  const { scrollY } = useScroll();
+  const scrollVelocity = useVelocity(scrollY);
+  const smoothVelocity = useSpring(scrollVelocity, { damping: 50, stiffness: 400 });
+  const skewX = useTransform(smoothVelocity, [-2500, 2500], [8, -8]);
+  const x = useTransform(baseX, (v) => `${v}%`);
+  const direction = useRef(reverse ? 1 : -1);
+
+  useAnimationFrame((_, delta) => {
+    if (!inView || reduceMotion) return;
+    const velocity = smoothVelocity.get();
+    // Scrolling back up flips the direction
+    if (velocity < -80) direction.current = reverse ? -1 : 1;
+    else if (velocity > 80) direction.current = reverse ? 1 : -1;
+
+    const loop = 100 / MARQUEE_COPIES;
+    const boost = 1 + Math.min(Math.abs(velocity) / 350, 6);
+    const next = baseX.get() + direction.current * boost * 1.8 * (Math.min(delta, 50) / 1000);
+    // Wrap into [-loop, 0) so the jump lands on an identical frame
+    baseX.set(((next % loop) - loop) % loop);
+  });
+
   return (
-    <div className="relative overflow-hidden border-y border-foreground/15 bg-ink text-paper py-5">
-      <div
-        className="marquee flex whitespace-nowrap text-2xl font-medium tracking-tight md:text-3xl"
-        style={{ animationDirection: reverse ? "reverse" : "normal" }}
+    <div ref={ref} className="relative overflow-hidden border-y border-foreground/15 bg-ink text-paper py-5">
+      <motion.div
+        className="marquee flex w-max whitespace-nowrap text-2xl font-medium tracking-tight md:text-3xl"
+        style={{ x, skewX }}
       >
-        {[...items, ...items, ...items].map((t, i) => (
+        {Array.from({ length: MARQUEE_COPIES }, () => items).flat().map((t, i) => (
           <span key={i} className="mx-8 flex items-center gap-8 group">
             <span className="transition-colors group-hover:text-accent">{t}</span>
             <span className="text-accent animate-pulse">●</span>
           </span>
         ))}
-      </div>
+      </motion.div>
     </div>
   );
 }
@@ -354,23 +413,27 @@ function KineticLetter({
   char: string; i: number; hovered: boolean; baseDelay?: number; accent?: boolean;
 }) {
   const phase = (i * 1.3) % (2 * Math.PI);
+  // Until the staggered entrance has played, the hover wave stays off
+  const [entered, setEntered] = useState(false);
+  const wave = hovered && entered;
   return (
     <motion.span
       className={`inline-block cursor-default ${
         accent ? "text-accent" : ""
       }`}
-      initial={{ y: "110%", opacity: 0 }}
+      initial={{ y: "110%", opacity: 0, rotate: i % 2 === 0 ? 8 : -8 }}
       animate={
-        hovered
+        wave
           ? {
               y: [0, -8 + Math.sin(phase) * 4, 0],
               rotate: [0, (i % 2 === 0 ? 2 : -2), 0],
               scale: [1, 1.05, 1],
+              opacity: 1,
             }
           : { y: 0, rotate: 0, scale: 1, opacity: 1 }
       }
       transition={
-        hovered
+        wave
           ? {
               duration: 2.2,
               delay: i * 0.07,
@@ -378,8 +441,11 @@ function KineticLetter({
               repeatType: "loop",
               ease: "easeInOut",
             }
-          : { duration: 0.6, ease: [0.16, 1, 0.3, 1] }
+          : entered
+            ? { duration: 0.6, ease: EASE_OUT }
+            : { duration: 1, delay: INTRO_DELAY + baseDelay + i * 0.045, ease: EASE_OUT }
       }
+      onAnimationComplete={() => setEntered(true)}
       style={{ originY: 0.8 }}
     >
       {char}
@@ -389,22 +455,7 @@ function KineticLetter({
 
 /* ─── Theme Toggle ─── */
 function ThemeToggle() {
-  const [isDark, setIsDark] = useState(false);
-
-  useEffect(() => {
-    const saved = localStorage.getItem("theme");
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const dark = saved === "dark" || (!saved && prefersDark);
-    setIsDark(dark);
-    document.documentElement.classList.toggle("dark", dark);
-  }, []);
-
-  const toggle = () => {
-    const next = !isDark;
-    setIsDark(next);
-    document.documentElement.classList.toggle("dark", next);
-    localStorage.setItem("theme", next ? "dark" : "light");
-  };
+  const { isDark, toggle } = useTheme();
 
   return (
     <motion.button
@@ -448,6 +499,7 @@ function ThemeToggle() {
 function Hero() {
   const ref = useRef<HTMLDivElement>(null);
   const heroRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
   const line1Ref = useRef<HTMLSpanElement>(null);
   const line2Ref = useRef<HTMLSpanElement>(null);
   const line3Ref = useRef<HTMLSpanElement>(null);
@@ -472,6 +524,7 @@ function Hero() {
     <section ref={ref} id="hero" className="relative min-h-screen overflow-hidden bg-paper text-ink">
       <div className="absolute inset-0 bg-grid" />
       <div className="absolute inset-0 projection" />
+      <KineticCanvas />
 
       {/* Animated gradient orbs */}
       <GradientOrb className="w-[600px] h-[600px] bg-accent/20 top-[-100px] right-[-100px]" />
@@ -483,7 +536,7 @@ function Hero() {
           <motion.div
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.7, delay: 0.1 }}
+            transition={{ duration: 0.7, delay: INTRO_DELAY + 0.1 }}
           >
             <TextScramble text="K · H — Studio / 2026" className="font-semibold" />
           </motion.div>
@@ -494,7 +547,7 @@ function Hero() {
           <motion.span
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            transition={{ duration: 0.7, delay: 0.2 }}
+            transition={{ duration: 0.7, delay: INTRO_DELAY + 0.2 }}
             className="hidden md:inline text-muted-foreground"
           >
             <TextScramble text="Tirupati ⇄ Earth · 13.6288°N" />
@@ -507,7 +560,7 @@ function Hero() {
           <motion.span
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.7, delay: 0.1 }}
+            transition={{ duration: 0.7, delay: INTRO_DELAY + 0.1 }}
             className="flicker text-accent font-semibold"
           >
             ● rec
@@ -528,7 +581,7 @@ function Hero() {
           className="flex items-baseline justify-between font-mono text-xs uppercase tracking-widest text-muted-foreground"
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, delay: 0.3 }}
+          transition={{ duration: 0.6, delay: INTRO_DELAY + 0.1 }}
         >
           <span>Issue №01 — Portfolio</span>
           <span>B.Tech ECE · CGPA 8.9</span>
@@ -536,6 +589,7 @@ function Hero() {
 
         {/* Hero title — Kinetic Typography on hover */}
         <h1
+          ref={titleRef}
           className="mt-10 font-display font-medium hero-title select-none relative"
           onMouseEnter={() => setIsNameHovered(true)}
           onMouseLeave={() => setIsNameHovered(false)}
@@ -556,7 +610,7 @@ function Hero() {
                 className="inline-block"
                 initial={{ y: "110%", opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
-                transition={{ duration: 0.8, delay: 0.97, ease: [0.16, 1, 0.3, 1] }}
+                transition={{ duration: 1, delay: INTRO_DELAY + 0.5, ease: EASE_OUT }}
               >
                 &mdash;
               </motion.span>
@@ -572,18 +626,19 @@ function Hero() {
                 className="text-accent inline-block cursor-pointer"
                 initial={{ y: "110%", opacity: 0 }}
                 animate={isNameHovered
-                  ? { y: [0, -8, 0], rotate: [0, 45, 0], scale: [1, 1.2, 1] }
+                  ? { y: [0, -8, 0], rotate: [0, 45, 0], scale: [1, 1.2, 1], opacity: 1 }
                   : { y: 0, opacity: 1 }
                 }
                 transition={isNameHovered
                   ? { duration: 2.2, repeat: Infinity, ease: "easeInOut" }
-                  : { duration: 0.8, delay: 1.2, ease: [0.16, 1, 0.3, 1] }
+                  : { duration: 1, delay: INTRO_DELAY + 0.87, ease: EASE_OUT }
                 }
               >
                 .
               </motion.span>
             </span>
           </span>
+          <NameRunner containerRef={titleRef} line1Ref={line1Ref} line2Ref={line2Ref} startDelay={(INTRO_DELAY + 1.9) * 1000} />
         </h1>
       </motion.div>
 
@@ -595,7 +650,7 @@ function Hero() {
           className="md:col-span-5 md:col-start-1"
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.9, delay: 1.0, ease: [0.16, 1, 0.3, 1] }}
+          transition={{ duration: 0.9, delay: INTRO_DELAY + 0.6, ease: EASE_OUT }}
         >
           <p className="font-serif text-3xl italic leading-tight md:text-5xl">
             React developer and AI builder crafting{" "}
@@ -607,7 +662,7 @@ function Hero() {
           className="md:col-span-4 md:col-start-9"
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.9, delay: 1.15, ease: [0.16, 1, 0.3, 1] }}
+          transition={{ duration: 0.9, delay: INTRO_DELAY + 0.7, ease: EASE_OUT }}
         >
           <p className="font-mono text-sm uppercase tracking-widest text-muted-foreground">— Index</p>
           <ul className="mt-4 space-y-2 font-display text-lg">
@@ -623,7 +678,7 @@ function Hero() {
                 className="border-b border-foreground/15 py-2 overflow-hidden"
                 initial={{ x: 30, opacity: 0 }}
                 animate={{ x: 0, opacity: 1 }}
-                transition={{ duration: 0.6, delay: 1.2 + i * 0.08, ease: [0.16, 1, 0.3, 1] }}
+                transition={{ duration: 0.6, delay: INTRO_DELAY + 0.75 + i * 0.08, ease: EASE_OUT }}
               >
                 <a
                   href={`#${s.id}`}
@@ -643,7 +698,7 @@ function Hero() {
         className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground z-10"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        transition={{ delay: 1.8, duration: 0.6 }}
+        transition={{ delay: INTRO_DELAY + 1.3, duration: 0.6 }}
       >
         <span>Scroll</span>
         <motion.div
@@ -667,7 +722,10 @@ function ProjectCard({ p, i }: { p: (typeof projects)[0]; i: number }) {
 
   const mouseX = useMotionValue(0);
   const mouseY = useMotionValue(0);
-  const [pixelPos, setPixelPos] = useState({ x: 0, y: 0 });
+  // Pointer position as motion values, so the glow follows without re-rendering the card
+  const glowX = useMotionValue(0);
+  const glowY = useMotionValue(0);
+  const glow = useMotionTemplate`radial-gradient(160px circle at ${glowX}px ${glowY}px, rgba(255,255,255,0.07) 0%, transparent 80%), radial-gradient(600px circle at ${glowX}px ${glowY}px, rgba(255, 59, 31, 0.08), transparent 70%)`;
   const rotateX = useSpring(useTransform(mouseY, [-0.5, 0.5], [6, -6]), { damping: 20, stiffness: 200 });
   const rotateY = useSpring(useTransform(mouseX, [-0.5, 0.5], [-6, 6]), { damping: 20, stiffness: 200 });
 
@@ -678,7 +736,8 @@ function ProjectCard({ p, i }: { p: (typeof projects)[0]; i: number }) {
     const y = (e.clientY - rect.top) / rect.height - 0.5;
     mouseX.set(x);
     mouseY.set(y);
-    setPixelPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    glowX.set(e.clientX - rect.left);
+    glowY.set(e.clientY - rect.top);
   };
 
   const handleMouseLeave = () => {
@@ -697,21 +756,11 @@ function ProjectCard({ p, i }: { p: (typeof projects)[0]; i: number }) {
       }`}
       onClick={() => p.url && window.open(p.url, "_blank")}
     >
-      {/* Specular glow */}
-      <div
+      {/* Specular glow + glare shine */}
+      <motion.div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 opacity-0 group-hover/card:opacity-100 transition-opacity duration-500"
-        style={{
-          background: `radial-gradient(600px circle at ${pixelPos.x}px ${pixelPos.y}px, rgba(255, 59, 31, 0.08), transparent 70%)`,
-        }}
-      />
-      {/* Glare shine layer */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 rounded-none opacity-0 group-hover/card:opacity-100 transition-opacity duration-500 overflow-hidden"
-        style={{
-          background: `radial-gradient(160px circle at ${pixelPos.x}px ${pixelPos.y}px, rgba(255,255,255,0.07) 0%, transparent 80%)`,
-        }}
+        style={{ background: glow }}
       />
 
       <div className="grid grid-cols-12 gap-8 px-6 md:px-10 items-center relative z-10">
@@ -769,7 +818,7 @@ function ProjectCard({ p, i }: { p: (typeof projects)[0]; i: number }) {
                 viewport={{ once: true, margin: "-60px" }}
                 transition={{ duration: 0.5, delay: 0.25 + j * 0.07, ease: [0.16, 1, 0.3, 1] }}
                 whileHover={{ x: 6, scale: 1.02 }}
-                className="flex items-center gap-3 border-l-2 border-accent pl-3 py-1 bg-foreground/[0.02] rounded-r transition-all group-hover/card:bg-accent/[0.05]"
+                className="flex items-center gap-3 border-l-2 border-accent pl-3 py-1 bg-foreground/[0.02] rounded-r transition-colors group-hover/card:bg-accent/[0.05]"
               >
                 <span className="text-muted-foreground font-semibold">0{j + 1}</span>
                 <span>{pl}</span>
@@ -799,7 +848,7 @@ function Poster({ colors, label, no }: { colors: string[]; label: string; no: st
       className="relative aspect-3-4 w-full overflow-hidden border border-foreground/20 poster-shadow rounded-sm group/poster"
       style={{ background: c }}
     >
-      <div className="absolute inset-0 grain opacity-60 pointer-events-none" />
+      <div className="absolute inset-0 grain-local opacity-60 pointer-events-none" />
 
       {/* CRT Scanline sweep */}
       <div className="pointer-events-none absolute inset-x-0 h-16 bg-gradient-to-b from-transparent via-white/10 to-transparent animate-scanline" />
@@ -859,7 +908,7 @@ function ProfileCard() {
       aria-label="Reveal Harshavardhan's portrait"
       className="group relative mt-12 min-h-80 overflow-hidden border border-foreground/20 bg-ink text-paper outline-none transition-all duration-500 hover:-rotate-1 hover:shadow-2xl focus:-rotate-1 md:mt-0 md:min-h-[30rem] rounded-sm"
     >
-      <div className="absolute inset-0 grain opacity-60" />
+      <div className="absolute inset-0 grain-local opacity-60" />
       <div className="relative z-10 flex h-full min-h-80 flex-col p-5 md:min-h-[30rem]">
         <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-widest text-paper/70">
           <span className="flex items-center gap-1.5">
@@ -951,7 +1000,8 @@ function Skills() {
           </div>
         </div>
 
-        <div className="mt-16 grid grid-cols-1 gap-10 md:grid-cols-3">
+        <div className="relative mt-16 grid grid-cols-1 gap-10 md:grid-cols-3">
+          <AnimatePresence mode="popLayout" initial={false}>
           {Object.entries(skills)
             .filter(([k]) => selectedCategory === "All" || selectedCategory === k)
             .map(([k, v], groupIdx) => {
@@ -959,9 +1009,11 @@ function Skills() {
               return (
                 <motion.div
                   key={k}
-                  initial={{ opacity: 0, y: 30 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.6, delay: groupIdx * 0.12, ease: [0.16, 1, 0.3, 1] }}
+                  layout
+                  initial={{ opacity: 0, y: 30, scale: 0.96 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -16, scale: 0.96, transition: { duration: 0.25 } }}
+                  transition={{ duration: 0.6, delay: groupIdx * 0.08, ease: EASE_OUT, layout: { type: "spring", damping: 26, stiffness: 240 } }}
                   className="border-t border-paper/20 pt-6"
                 >
                   <div className="flex items-center gap-2 font-mono text-xs uppercase tracking-widest text-accent">
@@ -996,6 +1048,7 @@ function Skills() {
                 </motion.div>
               );
             })}
+          </AnimatePresence>
         </div>
 
         <div className="mt-20 flex flex-wrap items-center gap-3 pt-8 border-t border-paper/15 font-mono text-xs uppercase tracking-wider text-paper/70">
@@ -1016,8 +1069,8 @@ function Skills() {
               whileInView={{ opacity: 1, scale: 1 }}
               viewport={{ once: true }}
               transition={{ duration: 0.4, delay: i * 0.06 }}
-              whileHover={{ scale: 1.06, borderColor: "rgba(255, 59, 31, 0.8)", color: "#ff3b1f" }}
-              className="rounded-full border border-paper/20 px-3 py-1 bg-paper/5 transition-colors cursor-default"
+              whileHover={{ scale: 1.06 }}
+              className="rounded-full border border-paper/20 px-3 py-1 bg-paper/5 transition-colors hover:border-accent hover:text-accent cursor-default"
             >
               {spec}
             </motion.span>
@@ -1028,11 +1081,59 @@ function Skills() {
   );
 }
 
+/* ─── Statement that inks in word by word as it scrolls through the viewport ─── */
+const STATEMENT =
+  "I build at the seam between code, AI, and kinetic visual systems — utilizing React, Python, JavaScript, Java, and automation pipelines to create products that feel clear, fast, and remarkably alive.";
+
+function ScrollWord({ word, range, progress }: { word: string; range: [number, number]; progress: MotionValue<number> }) {
+  const opacity = useTransform(progress, range, [0.15, 1]);
+  // "code," keeps its accent underline, with the comma outside it
+  const accent = word.startsWith("code");
+  return (
+    <motion.span style={{ opacity }}>
+      {accent ? (
+        <>
+          <span className="text-accent underline decoration-accent/40 decoration-wavy underline-offset-4">code</span>
+          {word.slice(4)}
+        </>
+      ) : (
+        word
+      )}{" "}
+    </motion.span>
+  );
+}
+
+function ScrollStatement({ className = "" }: { className?: string }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  const reduceMotion = useReducedMotion();
+  const { scrollYProgress } = useScroll({ target: ref, offset: ["start 0.9", "end 0.55"] });
+  const words = STATEMENT.split(" ");
+
+  if (reduceMotion) {
+    return <p ref={ref} className={className}>{STATEMENT}</p>;
+  }
+
+  return (
+    <p ref={ref} className={className} aria-label={STATEMENT}>
+      {words.map((word, i) => (
+        <ScrollWord
+          key={i}
+          word={word}
+          progress={scrollYProgress}
+          range={[i / words.length, Math.min(1, (i + 3) / words.length)]}
+        />
+      ))}
+    </p>
+  );
+}
+
 /* ─── About with scroll-driven parallax ─── */
 function About() {
   const ref = useRef<HTMLElement>(null);
   const { scrollYProgress } = useScroll({ target: ref, offset: ["start end", "end start"] });
   const quoteY = useTransform(scrollYProgress, [0, 1], [60, -60]);
+  // The timeline rail draws itself as the section comes up the screen
+  const railScale = useTransform(scrollYProgress, [0.15, 0.5], [0, 1]);
 
   return (
     <section ref={ref} id="about" className="relative bg-paper py-24 text-ink md:py-32 overflow-hidden">
@@ -1058,7 +1159,10 @@ function About() {
           </p>
 
           <div className="mt-6 space-y-6 relative pl-2">
-            <div className="absolute left-[9px] top-3 bottom-3 w-0.5 bg-gradient-to-b from-accent via-foreground/30 to-foreground/10" />
+            <motion.div
+              style={{ scaleY: railScale }}
+              className="absolute left-[9px] top-3 bottom-3 w-0.5 origin-top bg-gradient-to-b from-accent via-foreground/30 to-foreground/10"
+            />
 
             {[
               {
@@ -1106,16 +1210,7 @@ function About() {
         </div>
 
         <div className="col-span-12 md:col-span-7 md:col-start-6">
-          <motion.p
-            style={{ y: quoteY }}
-            className="font-serif text-4xl italic leading-[1.08] md:text-6xl"
-          >
-            I build at the seam between{" "}
-            <span className="text-accent underline decoration-accent/40 decoration-wavy underline-offset-4">
-              code
-            </span>
-            , AI, and kinetic visual systems — utilizing React, Python, JavaScript, Java, and automation pipelines to create products that feel clear, fast, and remarkably alive.
-          </motion.p>
+          <ScrollStatement className="font-serif text-4xl italic leading-[1.08] md:text-6xl" />
 
           <div className="mt-12 grid grid-cols-2 gap-6 border-t border-foreground/15 pt-8 font-mono text-xs uppercase tracking-widest md:grid-cols-4">
             {[
@@ -1210,7 +1305,7 @@ function Contact({ onCopy }: { onCopy: (msg: string) => void }) {
                   whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true }}
                   transition={{ duration: 0.5, delay: idx * 0.1 }}
-                  className="group flex items-center justify-between border-y border-current/30 py-6 transition-all duration-300 hover:bg-ink/10 px-3 rounded"
+                  className="group flex items-center justify-between border-y border-current/30 py-6 transition-colors duration-300 hover:bg-ink/10 px-3 rounded"
                 >
                   <a
                     href={l.href}
@@ -1268,6 +1363,7 @@ export function Portfolio() {
   const [showCertifications, setShowCertifications] = useState(true);
   const [selectedCert, setSelectedCert] = useState<CertificateItem | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [envelopeOpened, setEnvelopeOpened] = useState(false);
 
   const handleCopyToast = (msg: string) => {
     setToastMessage(msg);
@@ -1308,9 +1404,10 @@ export function Portfolio() {
   ];
 
   return (
+    <MotionConfig reducedMotion="user">
     <main className="relative">
       <SmoothScroll />
-      <KineticCanvas />
+      <Envelope onOpen={() => setEnvelopeOpened(true)} />
       <FloatingGlyphs />
       <ScrollProgress />
       <Cursor />
@@ -1318,7 +1415,8 @@ export function Portfolio() {
       <Toast message={toastMessage} />
       <CertificateModal certificate={selectedCert} onClose={() => setSelectedCert(null)} />
 
-      <Hero />
+      {/* Remounting replays the hero entrance once the envelope has opened */}
+      <Hero key={envelopeOpened ? "opened" : "sealed"} />
       <Marquee
         items={[
           "React Development",
@@ -1427,7 +1525,7 @@ export function Portfolio() {
                     transition={{ duration: 0.6, delay: index * 0.09, ease: [0.16, 1, 0.3, 1] }}
                     whileHover={{ y: -10, scale: 1.025 }}
                     onClick={() => setSelectedCert(certificate)}
-                    className="group relative cursor-pointer border border-foreground/15 bg-background p-4 shadow-sm transition-all duration-300 hover:border-accent hover:shadow-xl rounded-sm overflow-hidden"
+                    className="group relative cursor-pointer border border-foreground/15 bg-background p-4 shadow-sm transition-[border-color,box-shadow] duration-300 hover:border-accent hover:shadow-xl rounded-sm overflow-hidden"
                   >
                     {/* Hover gleam & holographic shimmer */}
                     <div className="pointer-events-none absolute inset-0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000 bg-gradient-to-r from-transparent via-white/25 to-transparent -skew-x-12" />
@@ -1480,5 +1578,6 @@ export function Portfolio() {
       <About />
       <Contact onCopy={handleCopyToast} />
     </main>
+    </MotionConfig>
   );
 }

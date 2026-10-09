@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Space_Grotesk, Instrument_Serif, JetBrains_Mono } from "next/font/google";
+import { Space_Grotesk, Instrument_Serif, JetBrains_Mono, Reggae_One } from "next/font/google";
 import "./globals.css";
 
 const spaceGrotesk = Space_Grotesk({
@@ -19,6 +19,14 @@ const jetbrainsMono = JetBrains_Mono({
   variable: "--font-jetbrains-mono",
   subsets: ["latin"],
   weight: ["400", "500"],
+});
+
+// Manga-title face for the envelope name — covers both Latin and Japanese glyphs
+const reggaeOne = Reggae_One({
+  variable: "--font-reggae-one",
+  subsets: ["latin"],
+  weight: ["400"],
+  preload: false,
 });
 
 export const viewport = {
@@ -50,7 +58,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${spaceGrotesk.variable} ${instrumentSerif.variable} ${jetbrainsMono.variable} h-full antialiased`}
+      className={`${spaceGrotesk.variable} ${instrumentSerif.variable} ${jetbrainsMono.variable} ${reggaeOne.variable} h-full antialiased`}
     >
       <body className="grain min-h-full flex flex-col">{children}</body>
     </html>

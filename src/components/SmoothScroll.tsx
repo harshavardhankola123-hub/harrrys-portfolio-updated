@@ -2,6 +2,37 @@
 
 import { useEffect } from "react";
 import Lenis from "lenis";
+import { frame, cancelFrame } from "framer-motion";
+
+let lenisInstance: Lenis | null = null;
+
+const easeOutQuart = (t: number) => 1 - Math.pow(1 - t, 4);
+
+/* Scroll to an element or a pixel offset through Lenis, falling back to native smooth scroll */
+export function scrollToTarget(target: HTMLElement | number) {
+  if (lenisInstance) {
+    lenisInstance.scrollTo(target, {
+      offset: typeof target === "number" ? 0 : -24,
+      duration: 1.4,
+      easing: easeOutQuart,
+    });
+  } else if (typeof target === "number") {
+    window.scrollTo({ top: target, behavior: "smooth" });
+  } else {
+    target.scrollIntoView({ behavior: "smooth" });
+  }
+}
+
+/* Freeze or release page scrolling (used while the envelope intro is up) */
+export function setScrollLocked(locked: boolean) {
+  document.documentElement.style.overflow = locked ? "hidden" : "";
+  if (locked) {
+    window.scrollTo(0, 0);
+    lenisInstance?.stop();
+  } else {
+    lenisInstance?.start();
+  }
+}
 
 export function SmoothScroll() {
   useEffect(() => {
@@ -9,22 +40,20 @@ export function SmoothScroll() {
     if (prefersReducedMotion) return;
 
     const lenis = new Lenis({
-      duration: 1.6,
-      easing: (t: number) => 1 - Math.pow(1 - t, 4),
+      lerp: 0.09,
       orientation: "vertical",
       gestureOrientation: "vertical",
       smoothWheel: true,
-      wheelMultiplier: 0.85,
+      wheelMultiplier: 1,
       touchMultiplier: 2.0,
       infinite: false,
     });
+    lenisInstance = lenis;
 
-    let rafId: number;
-    function raf(time: number) {
-      lenis.raf(time);
-      rafId = requestAnimationFrame(raf);
-    }
-    rafId = requestAnimationFrame(raf);
+    // Drive Lenis from framer-motion's frame loop so scroll-linked
+    // animations read the new scroll position in the same frame
+    const update = ({ timestamp }: { timestamp: number }) => lenis.raf(timestamp);
+    frame.update(update, true);
 
     // Anchor link smooth scroll
     const handleAnchorClick = (e: MouseEvent) => {
@@ -36,7 +65,7 @@ export function SmoothScroll() {
         const element = document.getElementById(id);
         if (element) {
           e.preventDefault();
-          lenis.scrollTo(element, { offset: -24, duration: 1.8 });
+          scrollToTarget(element);
         }
       }
     };
@@ -44,9 +73,10 @@ export function SmoothScroll() {
     document.addEventListener("click", handleAnchorClick);
 
     return () => {
-      cancelAnimationFrame(rafId);
+      cancelFrame(update);
       document.removeEventListener("click", handleAnchorClick);
       lenis.destroy();
+      lenisInstance = null;
     };
   }, []);
 

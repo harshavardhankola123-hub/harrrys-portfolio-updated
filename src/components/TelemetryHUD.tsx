@@ -40,7 +40,8 @@ export function TelemetryHUD() {
 
   useEffect(() => {
     return scrollVelocity.on("change", (latest) => {
-      setScrollSpeed(Math.min(999, Math.round(Math.abs(latest))));
+      // Quantized so the HUD re-renders a few times per scroll, not every frame
+      setScrollSpeed(Math.min(990, Math.round(Math.abs(latest) / 10) * 10));
     });
   }, [scrollVelocity]);
 

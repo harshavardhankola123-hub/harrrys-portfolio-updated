@@ -7,6 +7,7 @@
   --font-display: var(--font-space-grotesk), "Inter", sans-serif;
   --font-serif: var(--font-instrument-serif), "Times New Roman", serif;
   --font-mono: var(--font-jetbrains-mono), monospace;
+  --font-poster: var(--font-reggae-one), var(--font-space-grotesk), sans-serif;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-ink: var(--ink);
@@ -78,7 +79,8 @@
 }
 
 /* Paper grain texture overlay */
-.grain::before {
+.grain::before,
+.grain-local::before {
   content: "";
   position: fixed;
   inset: 0;
@@ -89,6 +91,39 @@
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
 }
 
+/* Grain scoped to its own box, for cards — keeps the page to a single full-screen layer */
+.grain-local::before {
+  position: absolute;
+  z-index: 0;
+}
+
+/* Theme switch: the new theme is revealed by a clip-path circle driven from JS */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+/* Envelope intro: petals drifting down the backdrop */
+@keyframes petal-fall {
+  from { transform: translate3d(0, -10vh, 0) rotate(0deg); }
+  to { transform: translate3d(var(--drift, 0), 112vh, 0) rotate(540deg); }
+}
+
+.petal {
+  position: absolute;
+  top: 0;
+  border-radius: 80% 0 80% 0;
+  background: linear-gradient(135deg, #ffd3dc, #ff8fa8);
+  opacity: 0.55;
+  animation: petal-fall linear infinite;
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .petal { display: none; }
+}
+
 /* Grid background */
 .bg-grid {
   background-image:
@@ -97,12 +132,8 @@
   background-size: 80px 80px;
 }
 
-/* Marquee */
-@keyframes marquee {
-  from { transform: translateX(0); }
-  to { transform: translateX(-50%); }
-}
-  .marquee { animation: marquee 20s linear infinite; will-change: transform; }
+/* Marquee — position is driven from JS so it can react to scroll velocity */
+  .marquee { will-change: transform; }
 
 /* Flicker */
 @keyframes flicker {
@@ -288,11 +319,6 @@
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-foreground);
-}
-
-/* Smooth section transitions */
-section {
-  will-change: transform;
 }
 
 /* Hover link underline grow */

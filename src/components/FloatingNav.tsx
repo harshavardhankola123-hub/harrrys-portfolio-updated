@@ -3,6 +3,8 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { useEffect, useState } from "react";
 import { Briefcase, Wrench, User, Award, Send, ArrowUp, Sun, Moon } from "lucide-react";
+import { scrollToTarget } from "@/components/SmoothScroll";
+import { useTheme } from "@/lib/theme";
 
 const navItems = [
   { id: "projects", label: "Work", icon: Briefcase },
@@ -15,23 +17,7 @@ const navItems = [
 export function FloatingNav() {
   const [visible, setVisible] = useState(false);
   const [activeSection, setActiveSection] = useState("hero");
-  const [isDark, setIsDark] = useState(false);
-
-  // Initialize theme from localStorage or system preference
-  useEffect(() => {
-    const saved = localStorage.getItem("theme");
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    const dark = saved === "dark" || (!saved && prefersDark);
-    setIsDark(dark);
-    document.documentElement.classList.toggle("dark", dark);
-  }, []);
-
-  const toggleTheme = () => {
-    const next = !isDark;
-    setIsDark(next);
-    document.documentElement.classList.toggle("dark", next);
-    localStorage.setItem("theme", next ? "dark" : "light");
-  };
+  const { isDark, toggle: toggleTheme } = useTheme();
 
   useEffect(() => {
     const handleScroll = () => {
@@ -67,12 +53,12 @@ export function FloatingNav() {
   const scrollToSection = (id: string) => {
     const el = document.getElementById(id);
     if (el) {
-      el.scrollIntoView({ behavior: "smooth" });
+      scrollToTarget(el);
     }
   };
 
   const scrollToTop = () => {
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    scrollToTarget(0);
   };
 
 
