@@ -47,6 +47,7 @@ import { TelemetryHUD } from "@/components/TelemetryHUD";
 import { FloatingGlyphs } from "@/components/FloatingGlyphs";
 import { Envelope } from "@/components/Envelope";
 import { NameRunner } from "@/components/NameRunner";
+import { RubberBuddy } from "@/components/RubberBuddy";
 import { useTheme } from "@/lib/theme";
 
 const EASE_OUT = [0.16, 1, 0.3, 1] as const;
@@ -638,7 +639,7 @@ function Hero() {
               </motion.span>
             </span>
           </span>
-          <NameRunner containerRef={titleRef} line1Ref={line1Ref} line2Ref={line2Ref} startDelay={(INTRO_DELAY + 1.9) * 1000} />
+          <NameRunner containerRef={titleRef} line1Ref={line1Ref} line2Ref={line2Ref} line3Ref={line3Ref} startDelay={(INTRO_DELAY + 1.9) * 1000} />
         </h1>
       </motion.div>
 
@@ -1028,7 +1029,7 @@ function Skills() {
                         transition={{ type: "spring", damping: 15, stiffness: 300 }}
                         className="group flex items-center justify-between border-b border-paper/10 pb-3 cursor-default"
                       >
-                        <span className="font-display text-3xl font-medium md:text-4xl group-hover:text-accent transition-colors flex items-center gap-3">
+                        <span data-buddy className="font-display text-3xl font-medium md:text-4xl group-hover:text-accent transition-colors flex items-center gap-3">
                           <span>{s}</span>
                         </span>
                         <div className="flex items-center gap-3">
@@ -1114,7 +1115,7 @@ function ScrollStatement({ className = "" }: { className?: string }) {
   }
 
   return (
-    <p ref={ref} className={className} aria-label={STATEMENT}>
+    <p ref={ref} data-buddy className={className} aria-label={STATEMENT}>
       {words.map((word, i) => (
         <ScrollWord
           key={i}
@@ -1412,6 +1413,7 @@ export function Portfolio() {
       <ScrollProgress />
       <Cursor />
       <FloatingNav />
+      <RubberBuddy />
       <Toast message={toastMessage} />
       <CertificateModal certificate={selectedCert} onClose={() => setSelectedCert(null)} />
 

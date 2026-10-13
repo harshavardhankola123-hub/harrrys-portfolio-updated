@@ -34,7 +34,7 @@ export function CertificateModal({ certificate, onClose }: CertificateModalProps
   return (
     <AnimatePresence>
       {certificate && (
-        <div className="fixed inset-0 z-[250] flex items-center justify-center p-4 sm:p-6 md:p-10">
+        <div data-buddy="off" className="fixed inset-0 z-[250] flex items-center justify-center p-4 sm:p-6 md:p-10">
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
